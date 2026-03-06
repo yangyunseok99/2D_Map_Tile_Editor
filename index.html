@@ -1,0 +1,823 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Settings, Plus, Trash2, Upload, Download, Maximize, MousePointer2, PaintBucket, Pencil, Undo, Grid as GridIcon, ZoomIn, Copy, ClipboardPaste, HelpCircle, X, Image as ImageIcon } from 'lucide-react';
+
+// 다국어 텍스트 사전 (Localization Dictionary)
+const locales = {
+  ko: {
+    title: "2D 맵 타일 에디터",
+    subtitle: "드래그 앤 드롭으로 맵을 그리고 실시간으로 데이터를 추출하세요.",
+    help: "도움말",
+    helpTooltip: "사용 설명서 보기",
+    cols: "가로 (Cols):",
+    rows: "세로 (Rows):",
+    clear: "맵 초기화",
+    brushTitle: "브러시 선택",
+    addTileTitle: "새로운 타일(팔레트) 추가",
+    tileNamePh: "타일 이름",
+    addTileBtn: "타일 추가",
+    gridShow: "그리드 선 보기",
+    zoom: "줌",
+    currSize: "현재 크기:",
+    dragHelp: "(드래그하여 연속 칠하기 가능)",
+    bottomDescPre: "* 맵 데이터를 ",
+    bottomDescBold: ".json 파일",
+    bottomDescPost: "로 다운로드하거나 기존 파일을 불러옵니다.",
+    loadJson: "파일 불러오기 (.json)",
+    saveJson: "JSON 파일로 저장",
+    captureImg: "이미지로 캡처",
+    copyPalTitle: "팔레트 백업(클립보드 복사)",
+    pastePalTitle: "백업된 팔레트 불러오기",
+    delTitle: "삭제",
+    pencilTitle: "연필 (드래그 페인팅)",
+    fillTitle: "페인트 통 (영역 채우기)",
+    undoTitle: "실행 취소 (Undo)",
+    errFormat: "올바른 2차원 배열 형식이 아닙니다.",
+    errLength: "모든 행(Row)의 길이가 같아야 합니다.",
+    errFile: "파일 불러오기 오류: ",
+    alert0: "0번(빈칸) 타일은 삭제할 수 없습니다.",
+    alertCopy: "팔레트 데이터가 복사되었습니다. 메모장 등에 백업해두세요!",
+    promptPaste: "저장해둔 팔레트 JSON 데이터를 붙여넣어주세요.",
+    errPaste: "오류: 올바른 팔레트 JSON 형식이 아닙니다.",
+    guideTitle: "🎮 2D 맵 레벨 에디터 초간단 사용 가이드",
+    close: "닫기",
+    legendTitle: "🎨 타일 범례 (Palette)",
+    palette_0: "빈칸 (지우개)",
+    palette_1: "벽",
+    palette_2: "플레이어 시작점",
+    palette_3: "몬스터",
+    palette_4: "수풀/장애물",
+  },
+  en: {
+    title: "2D Map Tile Editor",
+    subtitle: "Draw maps with drag-and-drop and extract data in real-time.",
+    help: "Help",
+    helpTooltip: "View user guide",
+    cols: "Cols:",
+    rows: "Rows:",
+    clear: "Clear Map",
+    brushTitle: "Select Brush",
+    addTileTitle: "Add New Tile (Palette)",
+    tileNamePh: "Tile Name",
+    addTileBtn: "Add Tile",
+    gridShow: "Show Grid",
+    zoom: "Zoom",
+    currSize: "Current Size:",
+    dragHelp: "(Drag to paint continuously)",
+    bottomDescPre: "* Download map data as a ",
+    bottomDescBold: ".json file",
+    bottomDescPost: " or load an existing file.",
+    loadJson: "Import (.json)",
+    saveJson: "Export JSON",
+    captureImg: "Capture Image",
+    copyPalTitle: "Backup Palette (Copy to Clipboard)",
+    pastePalTitle: "Restore Backup Palette",
+    delTitle: "Delete",
+    pencilTitle: "Pencil (Drag to paint)",
+    fillTitle: "Paint Bucket (Fill area)",
+    undoTitle: "Undo",
+    errFormat: "Invalid 2D array format.",
+    errLength: "All rows must have the same length.",
+    errFile: "File import error: ",
+    alert0: "Tile ID 0 (Empty) cannot be deleted.",
+    alertCopy: "Palette data copied! Please paste it into a notepad to backup.",
+    promptPaste: "Please paste your saved palette JSON data.",
+    errPaste: "Error: Invalid palette JSON format.",
+    guideTitle: "🎮 2D Map Level Editor Quick Guide",
+    close: "Close",
+    legendTitle: "🎨 Palette Legend",
+    palette_0: "Empty (Eraser)",
+    palette_1: "Wall",
+    palette_2: "Player Spawn",
+    palette_3: "Monster",
+    palette_4: "Bush/Obstacle",
+  }
+};
+
+export default function LevelEditor() {
+  // --- 상태 관리 (State) ---
+  
+  // 다국어 상태 ('ko' | 'en')
+  const [lang, setLang] = useState('ko');
+
+  // 가이드 모달 상태
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
+
+  // 그리드 크기
+  const [rows, setRows] = useState(10);
+  const [cols, setCols] = useState(15);
+  
+  // 맵 데이터 (2차원 배열)
+  const [mapData, setMapData] = useState(() => 
+    Array(10).fill(0).map(() => Array(15).fill(0))
+  );
+
+  // 팔레트 데이터
+  const [palette, setPalette] = useState([
+    { id: 0, color: '#ffffff', name: '빈칸 (지우개)' },
+    { id: 1, color: '#334155', name: '벽' },
+    { id: 2, color: '#3b82f6', name: '플레이어 시작점' },
+    { id: 3, color: '#ef4444', name: '몬스터' },
+    { id: 4, color: '#22c55e', name: '수풀/장애물' },
+  ]);
+
+  // 현재 선택된 브러시 ID
+  const [activeBrush, setActiveBrush] = useState(1);
+  
+  // 드래그 페인팅 상태
+  const [isPainting, setIsPainting] = useState(false);
+  
+  // 새 팔레트 추가 폼 상태
+  const [newColor, setNewColor] = useState('#a855f7');
+  const [newName, setNewName] = useState('');
+
+  // --- 기획자 편의성 강화를 위한 추가 상태 ---
+  const [tool, setTool] = useState('pencil'); // 'pencil' | 'fill'
+  const [history, setHistory] = useState([]); // Undo를 위한 작업 히스토리
+  const [showGrid, setShowGrid] = useState(true); // 그리드 선 토글
+  const [cellSize, setCellSize] = useState(30); // 줌 인/아웃
+
+  // 파일 입력을 위한 ref
+  const fileInputRef = useRef(null);
+
+  // --- 함수 및 로직 ---
+
+  // 다국어 팔레트 이름 표시 (기본 타일만 번역)
+  const displayPaletteName = useCallback((id, originalName) => {
+    const key = `palette_${id}`;
+    if (id <= 4 && originalName === locales.ko[key]) {
+      return locales[lang][key];
+    }
+    return originalName;
+  }, [lang]);
+
+  // 전역 마우스 업 이벤트 (그리드 밖에서 마우스를 뗐을 때 페인팅 중지)
+  useEffect(() => {
+    const handleGlobalMouseUp = () => setIsPainting(false);
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
+  }, []);
+
+  // 그리드 크기 변경
+  const handleResize = (newRows, newCols) => {
+    const validRows = Math.max(1, Math.min(newRows, 50));
+    const validCols = Math.max(1, Math.min(newCols, 50));
+    
+    setRows(validRows);
+    setCols(validCols);
+    
+    // 기존 데이터 유지하면서 크기 조정
+    setMapData(prevData => {
+      const newData = Array(validRows).fill(0).map((_, r) => 
+        Array(validCols).fill(0).map((_, c) => {
+          return (prevData[r] && prevData[r][c] !== undefined) ? prevData[r][c] : 0;
+        })
+      );
+      return newData;
+    });
+  };
+
+  // 맵 전체 초기화
+  const clearMap = () => {
+    saveHistory(mapData);
+    setMapData(Array(rows).fill(0).map(() => Array(cols).fill(0)));
+  };
+
+  // --- 기획자 핵심 툴 로직 ---
+  const saveHistory = useCallback((currentData) => {
+    setHistory(prev => [...prev.slice(-19), currentData]); // 최근 20개 작업 저장
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    setHistory(prev => {
+      if (prev.length === 0) return prev;
+      const newHistory = [...prev];
+      const prevData = newHistory.pop();
+      setMapData(prevData);
+      return newHistory;
+    });
+  }, []);
+
+  // Ctrl+Z 단축키 지원
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        handleUndo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo]);
+
+  const floodFill = (startR, startC, targetId, replacementId) => {
+    if (targetId === replacementId) return;
+    const newData = mapData.map(row => [...row]);
+    const queue = [[startR, startC]];
+    
+    while (queue.length > 0) {
+      const [r, c] = queue.shift();
+      if (r < 0 || r >= rows || c < 0 || c >= cols) continue;
+      if (newData[r][c] !== targetId) continue;
+      
+      newData[r][c] = replacementId;
+      queue.push([r + 1, c], [r - 1, c], [r, c + 1], [r, c - 1]);
+    }
+    setMapData(newData);
+  };
+
+  const copyPalette = () => {
+    const el = document.createElement('textarea');
+    el.value = JSON.stringify(palette, null, 2);
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    alert(locales[lang].alertCopy);
+  };
+
+  const pastePalette = () => {
+    const input = prompt(locales[lang].promptPaste);
+    if (!input) return;
+    try {
+      const parsed = JSON.parse(input);
+      if (Array.isArray(parsed) && parsed[0].id !== undefined) {
+        setPalette(parsed);
+      } else { throw new Error(); }
+    } catch (err) {
+      alert(locales[lang].errPaste);
+    }
+  };
+  // -----------------------------
+
+  // 단일 셀 칠하기 로직
+  const paintCell = (r, c, brushId) => {
+    if (mapData[r][c] === brushId) return; // 이미 같은 색이면 무시
+    
+    const newData = [...mapData];
+    newData[r] = [...newData[r]];
+    newData[r][c] = brushId;
+    setMapData(newData);
+  };
+
+  // 마우스 이벤트 핸들러
+  const handleMouseDown = (e, r, c) => {
+    saveHistory(mapData); // 작업 전 히스토리 저장
+    
+    const isRightClick = e.button === 2; // 우클릭 확인
+    const targetBrush = isRightClick ? 0 : activeBrush; // 우클릭 시 무조건 지우개(0)
+
+    if (tool === 'fill' && !isRightClick) {
+      floodFill(r, c, mapData[r][c], targetBrush);
+    } else {
+      setIsPainting(true);
+      paintCell(r, c, targetBrush);
+    }
+  };
+
+  const handleMouseEnter = (e, r, c) => {
+    if (isPainting && tool === 'pencil') {
+      // e.buttons === 2 는 우클릭 드래그 중임을 의미함
+      const targetBrush = e.buttons === 2 ? 0 : activeBrush;
+      paintCell(r, c, targetBrush);
+    }
+  };
+
+  // PNG 이미지로 저장 (기획서 첨부용)
+  const handleExportImage = () => {
+    const canvas = document.createElement('canvas');
+    const gridWidth = cols * cellSize;
+    const gridHeight = rows * cellSize;
+    
+    // 범례(Legend) 영역 너비 및 높이 계산
+    const legendWidth = 220;
+    const legendHeight = palette.length * 30 + 70;
+    
+    // 캔버스 전체 크기 설정 (맵 + 범례)
+    canvas.width = gridWidth + legendWidth;
+    canvas.height = Math.max(gridHeight, legendHeight);
+    
+    const ctx = canvas.getContext('2d');
+
+    // 캔버스 배경을 흰색으로 채우기 (투명도 방지)
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 1. 좌측에 그리드 맵 그리기
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        ctx.fillStyle = getCellColor(mapData[r][c]);
+        ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
+
+        if (showGrid) {
+          ctx.strokeStyle = '#e5e7eb'; // grid color
+          ctx.lineWidth = 1;
+          ctx.strokeRect(c * cellSize, r * cellSize, cellSize, cellSize);
+        }
+      }
+    }
+
+    // 2. 우측에 팔레트 범례(Legend) 그리기
+    const legendX = gridWidth + 20;
+    
+    // 범례 제목
+    ctx.fillStyle = '#1e293b';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillText(locales[lang].legendTitle, legendX, 30);
+
+    // 팔레트 목록
+    palette.forEach((item, index) => {
+      const y = 55 + (index * 30);
+      
+      // 색상 박스
+      ctx.fillStyle = item.color;
+      ctx.fillRect(legendX, y, 20, 20);
+      
+      // 색상 박스 테두리
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(legendX, y, 20, 20);
+      
+      // 텍스트 (ID. 이름)
+      ctx.fillStyle = '#334155';
+      ctx.font = '14px sans-serif';
+      ctx.fillText(`${item.id}. ${displayPaletteName(item.id, item.name)}`, legendX + 30, y + 15);
+    });
+
+    // 파일로 다운로드
+    const url = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'level_map_screenshot.png';
+    link.click();
+  };
+
+  // JSON 파일로 저장 (Export)
+  const handleExportJSON = () => {
+    const dataStr = JSON.stringify(mapData, null, 2);
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "level_data.json";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // JSON 파일 불러오기 (Import)
+  const handleImportJSON = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const parsed = JSON.parse(e.target.result);
+        if (!Array.isArray(parsed) || parsed.length === 0 || !Array.isArray(parsed[0])) {
+          throw new Error(locales[lang].errFormat);
+        }
+        
+        const newR = parsed.length;
+        const newC = parsed[0].length;
+        
+        // 행 길이 일관성 검사
+        const isConsistent = parsed.every(row => Array.isArray(row) && row.length === newC);
+        if (!isConsistent) {
+          throw new Error(locales[lang].errLength);
+        }
+
+        saveHistory(); // 이전 상태 저장
+        setRows(newR);
+        setCols(newC);
+        setMapData(parsed);
+        
+        // 동일한 파일을 다시 선택할 수 있도록 input 초기화
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+      } catch (error) {
+        alert(locales[lang].errFile + error.message);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // 팔레트 항목 추가
+  const handleAddPalette = () => {
+    if (!newName.trim()) return;
+    // 가장 높은 ID 찾아서 + 1
+    const nextId = Math.max(...palette.map(p => p.id), 0) + 1;
+    setPalette([...palette, { id: nextId, color: newColor, name: newName }]);
+    setNewName('');
+  };
+
+  // 팔레트 항목 삭제
+  const handleDeletePalette = (id) => {
+    if (id === 0) {
+      alert(locales[lang].alert0);
+      return;
+    }
+    if (activeBrush === id) {
+      setActiveBrush(0);
+    }
+    setPalette(palette.filter(p => p.id !== id));
+  };
+
+  // 셀 색상 찾기 헬퍼
+  const getCellColor = (val) => {
+    const item = palette.find(p => p.id === val);
+    return item ? item.color : '#f87171'; // 매핑 안된 값은 눈에 띄게 빨간색 처리
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-6 font-sans text-gray-800 flex flex-col items-center">
+      <div className="max-w-6xl w-full bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden flex flex-col">
+        
+        {/* 헤더 */}
+        <header className="bg-slate-800 text-white p-4 flex justify-between items-center">
+          <div>
+            <h1 className="text-xl font-bold flex items-center gap-2">
+              <Settings className="w-5 h-5" /> {locales[lang].title}
+              <button 
+                onClick={() => setIsGuideOpen(true)}
+                className="ml-3 px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded-full transition-colors flex items-center gap-1 text-xs font-medium shadow"
+                title={locales[lang].helpTooltip}
+              >
+                <HelpCircle className="w-3.5 h-3.5" /> {locales[lang].help}
+              </button>
+              <button
+                onClick={() => setLang(lang === 'ko' ? 'en' : 'ko')}
+                className="ml-2 px-2 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded-full transition-colors flex items-center gap-1 text-xs font-medium border border-slate-600 shadow"
+                title={lang === 'ko' ? 'Switch to English' : '한국어로 변경'}
+              >
+                {lang === 'ko' ? '🇺🇸 EN' : '🇰🇷 KO'}
+              </button>
+            </h1>
+            <p className="text-slate-400 text-sm mt-1">{locales[lang].subtitle}</p>
+          </div>
+          
+          <div className="flex gap-4 items-center">
+            {/* 상단 툴바 (연필/채우기/실행취소) */}
+            <div className="flex gap-1 items-center bg-slate-700 p-1.5 rounded-lg shadow-inner">
+              <button onClick={() => setTool('pencil')} className={`p-1.5 rounded transition-colors ${tool === 'pencil' ? 'bg-blue-500 text-white' : 'text-gray-300 hover:bg-slate-600'}`} title={locales[lang].pencilTitle}>
+                <Pencil className="w-4 h-4" />
+              </button>
+              <button onClick={() => setTool('fill')} className={`p-1.5 rounded transition-colors ${tool === 'fill' ? 'bg-blue-500 text-white' : 'text-gray-300 hover:bg-slate-600'}`} title={locales[lang].fillTitle}>
+                <PaintBucket className="w-4 h-4" />
+              </button>
+              <div className="w-px h-5 bg-slate-500 mx-1"></div>
+              <button onClick={handleUndo} disabled={history.length === 0} className={`p-1.5 rounded transition-colors flex items-center gap-1 ${history.length === 0 ? 'text-gray-500 cursor-not-allowed' : 'text-gray-300 hover:bg-slate-600'}`} title={locales[lang].undoTitle}>
+                <Undo className="w-4 h-4" />
+                <span className="text-[10px] font-bold">{history.length}</span>
+              </button>
+            </div>
+
+            <div className="flex gap-4 items-center bg-slate-700 p-2 rounded-lg">
+              <div className="flex items-center gap-2">
+                <label className="text-sm">{locales[lang].cols}</label>
+                <input 
+                  type="number" 
+                  value={cols} 
+                  onChange={(e) => handleResize(rows, parseInt(e.target.value) || 1)}
+                  className="w-16 px-2 py-1 bg-slate-800 border border-slate-600 rounded text-center text-sm"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-sm">{locales[lang].rows}</label>
+                <input 
+                  type="number" 
+                  value={rows} 
+                  onChange={(e) => handleResize(parseInt(e.target.value) || 1, cols)}
+                  className="w-16 px-2 py-1 bg-slate-800 border border-slate-600 rounded text-center text-sm"
+                />
+              </div>
+              <button 
+                onClick={clearMap}
+                className="ml-2 px-3 py-1 bg-red-500 hover:bg-red-600 transition-colors rounded text-sm font-medium"
+              >
+                {locales[lang].clear}
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {/* 메인 콘텐츠 영역 */}
+        <div className="flex flex-col lg:flex-row flex-1 p-6 gap-6">
+          
+          {/* 좌측: 팔레트 관리 */}
+          <div className="w-full lg:w-72 flex flex-col gap-4">
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+              <div className="flex justify-between items-center mb-3">
+                <h2 className="font-semibold flex items-center gap-2">
+                  <MousePointer2 className="w-4 h-4 text-blue-500" /> {locales[lang].brushTitle}
+                </h2>
+                <div className="flex gap-1">
+                  <button onClick={copyPalette} title={locales[lang].copyPalTitle} className="p-1.5 bg-gray-200 hover:bg-gray-300 rounded text-gray-700 transition-colors">
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={pastePalette} title={locales[lang].pastePalTitle} className="p-1.5 bg-gray-200 hover:bg-gray-300 rounded text-gray-700 transition-colors">
+                    <ClipboardPaste className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                {palette.map((item) => (
+                  <div 
+                    key={item.id}
+                    onClick={() => setActiveBrush(item.id)}
+                    className={`flex items-center justify-between p-2 rounded cursor-pointer border-2 transition-all ${activeBrush === item.id ? 'border-blue-500 bg-blue-50' : 'border-transparent hover:bg-gray-100'}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div 
+                        className="w-6 h-6 rounded shadow-sm border border-gray-300"
+                        style={{ backgroundColor: item.color }}
+                      ></div>
+                      <span className="font-medium text-sm">
+                        {item.id}. {displayPaletteName(item.id, item.name)}
+                      </span>
+                    </div>
+                    {item.id !== 0 && (
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); handleDeletePalette(item.id); }}
+                        className="text-gray-400 hover:text-red-500 p-1"
+                        title={locales[lang].delTitle}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 새 타일 추가 */}
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mt-auto">
+              <h3 className="font-semibold text-sm mb-3 text-gray-700">{locales[lang].addTileTitle}</h3>
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="color" 
+                    value={newColor} 
+                    onChange={(e) => setNewColor(e.target.value)}
+                    className="w-8 h-8 rounded cursor-pointer border border-gray-300 p-0"
+                  />
+                  <input 
+                    type="text" 
+                    value={newName} 
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder={locales[lang].tileNamePh}
+                    className="flex-1 px-3 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <button 
+                  onClick={handleAddPalette}
+                  className="w-full flex justify-center items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white py-2 rounded transition-colors text-sm font-medium"
+                >
+                  <Plus className="w-4 h-4" /> {locales[lang].addTileBtn}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 우측: 그리드 캔버스 */}
+          <div className="flex-1 flex flex-col items-center justify-center bg-gray-200 border-2 border-dashed border-gray-300 rounded-xl p-4 overflow-auto min-h-[400px]">
+            
+            {/* 캔버스 상단 뷰어 옵션 */}
+            <div className="flex gap-5 w-full mb-4 justify-end items-center text-sm text-gray-700 font-medium">
+              <label className="flex items-center gap-2 cursor-pointer hover:text-blue-600 transition-colors">
+                <GridIcon className="w-4 h-4" />
+                <input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} className="cursor-pointer" />
+                {locales[lang].gridShow}
+              </label>
+              <div className="w-px h-4 bg-gray-400"></div>
+              <label className="flex items-center gap-2">
+                <ZoomIn className="w-4 h-4" />
+                {locales[lang].zoom}
+                <input type="range" min="10" max="60" value={cellSize} onChange={(e) => setCellSize(Number(e.target.value))} className="w-24 cursor-pointer accent-blue-600" />
+                <span className="w-8 text-right text-gray-500">{cellSize}px</span>
+              </label>
+            </div>
+
+            <div 
+              className="select-none bg-white shadow-lg"
+              style={{ 
+                display: 'grid', 
+                gridTemplateColumns: `repeat(${cols}, ${cellSize}px)`,
+                gridTemplateRows: `repeat(${rows}, ${cellSize}px)`,
+              }}
+              onMouseLeave={() => setIsPainting(false)} // 캔버스 밖으로 나가면 페인팅 중지
+              onContextMenu={(e) => e.preventDefault()} // 우클릭 시 기본 메뉴 안 뜨게 막기
+            >
+              {mapData.map((rowArr, r) => 
+                rowArr.map((cellVal, c) => (
+                  <div
+                    key={`${r}-${c}`}
+                    className={`hover:brightness-95 transition-all duration-75 ease-in-out box-border ${showGrid ? 'border border-gray-200' : ''} ${tool === 'fill' ? 'cursor-pointer' : 'cursor-crosshair'}`}
+                    style={{ backgroundColor: getCellColor(cellVal) }}
+                    onMouseDown={(e) => { e.preventDefault(); handleMouseDown(e, r, c); }}
+                    onMouseEnter={(e) => handleMouseEnter(e, r, c)}
+                    title={`(${r}, ${c}) - ID: ${cellVal}`}
+                  />
+                ))
+              )}
+            </div>
+            <div className="mt-4 text-sm text-gray-500 flex items-center gap-1">
+              <Maximize className="w-4 h-4" /> {locales[lang].currSize} {cols} x {rows} {locales[lang].dragHelp}
+            </div>
+          </div>
+        </div>
+
+        {/* 하단: 파일 저장 및 불러오기 영역 */}
+        <div className="bg-slate-50 border-t border-gray-200 p-4 flex justify-between items-center">
+          <div className="text-sm text-gray-500">
+            {locales[lang].bottomDescPre}<b>{locales[lang].bottomDescBold}</b>{locales[lang].bottomDescPost}
+          </div>
+          <div className="flex gap-3">
+            <input 
+              type="file" 
+              accept=".json" 
+              ref={fileInputRef} 
+              style={{ display: 'none' }} 
+              onChange={handleImportJSON} 
+            />
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded shadow transition-colors font-medium text-sm"
+            >
+              <Upload className="w-4 h-4" /> {locales[lang].loadJson}
+            </button>
+            <button 
+              onClick={handleExportJSON}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded shadow transition-colors font-medium text-sm"
+            >
+              <Download className="w-4 h-4" /> {locales[lang].saveJson}
+            </button>
+            <button 
+              onClick={handleExportImage}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded shadow transition-colors font-medium text-sm"
+            >
+              <ImageIcon className="w-4 h-4" /> {locales[lang].captureImg}
+            </button>
+          </div>
+        </div>
+
+        {/* --- 사용 설명서 팝업 (가이드 모달) --- */}
+        {isGuideOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in duration-200">
+              {/* 모달 헤더 */}
+              <div className="flex justify-between items-center p-5 border-b border-gray-200 bg-slate-50">
+                <h2 className="text-xl font-bold flex items-center gap-2 text-slate-800">
+                  <HelpCircle className="w-6 h-6 text-blue-500" /> 
+                  {locales[lang].guideTitle}
+                </h2>
+                <button 
+                  onClick={() => setIsGuideOpen(false)}
+                  className="p-2 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
+                  title={locales[lang].close}
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              {/* 모달 본문 (가이드 내용) */}
+              {lang === 'ko' ? (
+                <div className="p-6 overflow-y-auto text-slate-700 text-sm leading-relaxed space-y-6">
+                  <p className="text-base text-slate-600">
+                    게임 기획자나 개발자를 꿈꾸시나요? 이 툴은 복잡한 코딩 없이, 그림판에서 그림을 그리듯 슥슥 마우스로 드래그해서 게임 맵(지도) 데이터를 만들어주는 마법 같은 도구입니다.
+                  </p>
+
+                  <section>
+                    <h3 className="text-lg font-bold text-slate-900 mb-2 border-b border-slate-200 pb-1">🎨 1. 맵 그리기 (가장 기본!)</h3>
+                    <p>화면 왼쪽의 <strong>[브러시 선택]</strong>에서 원하는 타일(예: 벽, 몬스터, 수풀)을 클릭하세요. 그다음 오른쪽 넓은 격자(그리드) 화면에 마우스를 대고 <strong>클릭한 채로 쭉~ 드래그</strong>해 보세요. 엑셀 칸을 채우는 것처럼 연속해서 색이 칠해집니다!</p>
+                    <ul className="list-disc list-inside mt-2 text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                      <li><strong>지우개 꿀팁:</strong> 팔레트에서 지우개를 누르지 않아도, <strong>마우스 우클릭</strong>으로 칠하면 바로 지우개 모드가 됩니다!</li>
+                    </ul>
+                  </section>
+
+                  <section>
+                    <h3 className="text-lg font-bold text-slate-900 mb-2 border-b border-slate-200 pb-1">🛠️ 2. 짱 편한 마법의 도구들 (상단 툴바)</h3>
+                    <p>화면 위쪽 가운데를 보면 도구 버튼 3개가 있어요.</p>
+                    <ul className="space-y-3 mt-3 ml-2">
+                      <li className="flex gap-3 items-start"><span className="text-xl leading-none">✏️</span> <span><strong>연필:</strong> 마우스로 드래그해서 내가 원하는 곳만 칠할 때 써요.</span></li>
+                      <li className="flex gap-3 items-start"><span className="text-xl leading-none">🪣</span> <span><strong>페인트 통:</strong> 텅 빈 방이나 넓은 바다를 한 번에 같은 색으로 채우고 싶을 때 클릭하세요. (노가다 해방!)</span></li>
+                      <li className="flex gap-3 items-start"><span className="text-xl leading-none">↩️</span> <span><strong>실행 취소 (Undo):</strong> 앗 실수! 이럴 땐 버튼을 누르거나 키보드 <strong>Ctrl + Z</strong>를 누르세요. 최대 20번까지 되돌릴 수 있습니다.</span></li>
+                    </ul>
+                  </section>
+
+                  <section>
+                    <h3 className="text-lg font-bold text-slate-900 mb-2 border-b border-slate-200 pb-1">➕ 3. 나만의 타일(블록) 만들기</h3>
+                    <p>기본으로 제공되는 벽, 몬스터 말고 '용암', '보물상자' 같은 타일이 필요하다고요? 왼쪽 아래 <strong>[새로운 타일 추가]</strong>에서 나만의 타일을 만들어보세요.</p>
+                    <ol className="list-decimal list-inside mt-2 space-y-1 ml-2 font-medium">
+                      <li>색상 네모 칸을 눌러서 원하는 색을 고릅니다.</li>
+                      <li>'타일 이름' 칸에 "보물상자"라고 이름을 적습니다.</li>
+                      <li><strong>[+ 타일 추가]</strong> 버튼을 누르면 위쪽 팔레트에 짠! 하고 생깁니다.</li>
+                    </ol>
+                    <div className="mt-4 bg-amber-50 border border-amber-200 p-4 rounded-lg flex gap-3 items-start shadow-sm">
+                      <span className="text-amber-500 text-lg">💡</span>
+                      <div className="text-amber-900 text-sm">
+                        <strong className="block mb-1 text-amber-800">팔레트 백업 꿀팁:</strong> 
+                        나중에 이 사이트를 다시 열었을 때 내가 만든 타일 목록이 날아가면 슬프겠죠? 브러시 선택 옆에 있는 <code className="bg-amber-100 px-1 rounded">복사(문서 아이콘)</code> 버튼을 누르면 타일 정보가 복사됩니다. 메모장에 붙여넣기로 저장해두고, 나중에 <code className="bg-amber-100 px-1 rounded">불러오기(클립보드 아이콘)</code> 버튼을 눌러서 복구하세요!
+                      </div>
+                    </div>
+                  </section>
+
+                  <section>
+                    <h3 className="text-lg font-bold text-slate-900 mb-2 border-b border-slate-200 pb-1">📏 4. 맵 크기와 화면 조절하기</h3>
+                    <ul className="list-disc list-inside mt-2 space-y-2 ml-2">
+                      <li><strong>맵 넓히기:</strong> 화면 맨 위 오른쪽에서 <strong>가로(Cols)</strong>와 <strong>세로(Rows)</strong> 숫자를 바꿔보세요. (최대 50x50까지 가능)</li>
+                      <li><strong>맵 한눈에 보기:</strong> 맵 화면 바로 위에 있는 <strong>[줌]</strong> 슬라이더를 왼쪽으로 밀어보세요. 화면이 축소되면서 넓은 맵을 한눈에 볼 수 있습니다.</li>
+                      <li><strong>선 없애기:</strong> 타일들이 자연스럽게 이어져 있는지 보고 싶다면 <strong>[그리드 선 보기]</strong> 체크를 해제해 보세요.</li>
+                      <li><strong>싹 지우기:</strong> 맵을 처음부터 다시 그리고 싶다면 빨간색 <strong>[맵 초기화]</strong> 버튼을 누르세요.</li>
+                    </ul>
+                  </section>
+
+                  <section>
+                    <h3 className="text-lg font-bold text-slate-900 mb-2 border-b border-slate-200 pb-1">💾 5. 다 만든 맵 저장하고 불러오기 (진짜 중요!)</h3>
+                    <p>맵을 다 그렸다면, 이제 게임에 쓸 데이터로 만들어야겠죠? 화면 맨 아래를 보세요.</p>
+                    <ul className="space-y-3 mt-3 ml-2 bg-slate-50 p-4 rounded-lg border border-slate-100">
+                      <li className="flex gap-3"><span className="text-lg">📥</span> <span><strong>[JSON 파일로 저장]:</strong> 이 버튼을 누르면 지금까지 그린 맵이 <code>level_data.json</code> 파일로 컴퓨터에 다운로드됩니다. (이 파일을 프로그래머에게 주면 끝!)</span></li>
+                      <li className="flex gap-3"><span className="text-lg">📤</span> <span><strong>[파일 불러오기 (.json)]:</strong> 어제 만들다 만 맵을 이어서 그리고 싶나요? 다운로드 해두었던 파일을 선택하면, 그렸던 맵이 화면에 그대로 다시 나타납니다.</span></li>
+                      <li className="flex gap-3"><span className="text-lg">🖼️</span> <span><strong>[이미지로 캡처]:</strong> 기획서나 문서에 맵 사진을 넣고 싶을 때 누르세요! 맵 화면이 깔끔한 <code>.png</code> 사진 파일로 저장됩니다.</span></li>
+                    </ul>
+                  </section>
+
+                  <div className="text-center bg-blue-50 text-blue-800 p-4 rounded-xl mt-6 font-bold text-base shadow-sm">
+                    자, 이제 직접 클릭하고 드래그하면서 나만의 멋진 던전과 마을을 만들어보세요! 🎉
+                  </div>
+                </div>
+              ) : (
+                <div className="p-6 overflow-y-auto text-slate-700 text-sm leading-relaxed space-y-6">
+                  <p className="text-base text-slate-600">
+                    Dreaming of becoming a game designer or developer? This tool is a magical utility that lets you create game map data by simply dragging your mouse, just like drawing in a paint tool, without any complex coding.
+                  </p>
+
+                  <section>
+                    <h3 className="text-lg font-bold text-slate-900 mb-2 border-b border-slate-200 pb-1">🎨 1. Drawing the Map (The Basics!)</h3>
+                    <p>Click on the desired tile (e.g., Wall, Monster, Bush) from the <strong>[Select Brush]</strong> panel on the left. Then, <strong>click and drag</strong> on the wide grid screen on the right. Colors will be painted continuously, just like filling Excel cells!</p>
+                    <ul className="list-disc list-inside mt-2 text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                      <li><strong>Eraser Tip:</strong> You don't even need to select the eraser from the palette. Just <strong>Right-Click and drag</strong> to enter eraser mode instantly!</li>
+                    </ul>
+                  </section>
+
+                  <section>
+                    <h3 className="text-lg font-bold text-slate-900 mb-2 border-b border-slate-200 pb-1">🛠️ 2. Handy Magic Tools (Top Toolbar)</h3>
+                    <p>Look at the three tool buttons at the top center of the screen.</p>
+                    <ul className="space-y-3 mt-3 ml-2">
+                      <li className="flex gap-3 items-start"><span className="text-xl leading-none">✏️</span> <span><strong>Pencil:</strong> Use this to drag and paint only where you want.</span></li>
+                      <li className="flex gap-3 items-start"><span className="text-xl leading-none">🪣</span> <span><strong>Paint Bucket:</strong> Click this to fill an empty room or a wide area with the same color at once. (No more tedious clicking!)</span></li>
+                      <li className="flex gap-3 items-start"><span className="text-xl leading-none">↩️</span> <span><strong>Undo:</strong> Oops, made a mistake? Click this button or press <strong>Ctrl + Z</strong> on your keyboard. You can undo up to 20 times.</span></li>
+                    </ul>
+                  </section>
+
+                  <section>
+                    <h3 className="text-lg font-bold text-slate-900 mb-2 border-b border-slate-200 pb-1">➕ 3. Creating Your Own Tiles (Blocks)</h3>
+                    <p>Need tiles like 'Lava' or 'Treasure Box' besides the default walls and monsters? Create them in the <strong>[Add New Tile]</strong> section at the bottom left.</p>
+                    <ol className="list-decimal list-inside mt-2 space-y-1 ml-2 font-medium">
+                      <li>Click the color square to pick a color.</li>
+                      <li>Type a name like "Treasure Box" in the 'Tile Name' input.</li>
+                      <li>Click the <strong>[Add Tile]</strong> button, and it will magically appear in your palette above!</li>
+                    </ol>
+                    <div className="mt-4 bg-amber-50 border border-amber-200 p-4 rounded-lg flex gap-3 items-start shadow-sm">
+                      <span className="text-amber-500 text-lg">💡</span>
+                      <div className="text-amber-900 text-sm">
+                        <strong className="block mb-1 text-amber-800">Palette Backup Tip:</strong> 
+                        It would be sad to lose your custom tiles when you reopen this site later, right? Click the <code className="bg-amber-100 px-1 rounded">Copy (Document Icon)</code> button next to 'Select Brush' to copy your tile data. Save it in a notepad, and later click the <code className="bg-amber-100 px-1 rounded">Restore (Clipboard Icon)</code> button to bring them back!
+                      </div>
+                    </div>
+                  </section>
+
+                  <section>
+                    <h3 className="text-lg font-bold text-slate-900 mb-2 border-b border-slate-200 pb-1">📏 4. Adjusting Map Size and View</h3>
+                    <ul className="list-disc list-inside mt-2 space-y-2 ml-2">
+                      <li><strong>Expand Map:</strong> Change the <strong>Cols</strong> and <strong>Rows</strong> numbers at the top right. (Up to 50x50)</li>
+                      <li><strong>View at a Glance:</strong> Move the <strong>[Zoom]</strong> slider left, located just above the map, to zoom out and see large maps easily.</li>
+                      <li><strong>Hide Lines:</strong> Uncheck <strong>[Show Grid]</strong> if you want to see how tiles seamlessly connect without grid lines.</li>
+                      <li><strong>Clear All:</strong> Click the red <strong>[Clear Map]</strong> button to start over from scratch.</li>
+                    </ul>
+                  </section>
+
+                  <section>
+                    <h3 className="text-lg font-bold text-slate-900 mb-2 border-b border-slate-200 pb-1">💾 5. Save and Load Your Finished Map (Crucial!)</h3>
+                    <p>Once your map is complete, let's turn it into game data. Look at the bottom of the screen.</p>
+                    <ul className="space-y-3 mt-3 ml-2 bg-slate-50 p-4 rounded-lg border border-slate-100">
+                      <li className="flex gap-3"><span className="text-lg">📥</span> <span><strong>[Export JSON]:</strong> Click this to download your map as a <code>level_data.json</code> file. (Give this to your programmer!)</span></li>
+                      <li className="flex gap-3"><span className="text-lg">📤</span> <span><strong>[Import (.json)]:</strong> Want to continue working on a map from yesterday? Select your downloaded file, and your map will reappear on the screen.</span></li>
+                      <li className="flex gap-3"><span className="text-lg">🖼️</span> <span><strong>[Capture Image]:</strong> Click this when you need a picture of the map for your design documents! The map screen will be saved as a clean <code>.png</code> image.</span></li>
+                    </ul>
+                  </section>
+
+                  <div className="text-center bg-blue-50 text-blue-800 p-4 rounded-xl mt-6 font-bold text-base shadow-sm">
+                    Now, start clicking and dragging to create your own awesome dungeons and towns! 🎉
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
